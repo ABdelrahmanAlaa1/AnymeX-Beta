@@ -65,7 +65,7 @@ jobs:
           echo "Tag: $TAG"
           echo ""
 
-          if [[ "$TAG" == *"-beta" ]]; then
+          if [[ "${IS_BETA_BUILD}" == "true" ]]; then
             echo "🔵 Beta build detected"
             echo "────────────────────────────────────────────"
 
@@ -117,14 +117,14 @@ jobs:
             echo ""
             echo "Tag formats:"
             echo "  • Beta:   v0.0.0-beta (triggers rename)"
-            echo "  • Beta with iteration:   v0.0.0+1-beta (triggers rename)"
+            echo "  • Beta with iteration: v0.0.0+1-beta (triggers rename)"
             echo "  • Stable: v0.0.0 (no rename)"
           fi
 
           echo "════════════════════════════════════════════"
 
       - name: Configure Google Services for Beta
-        if: contains(github.ref_name, '-beta')
+        if: env.IS_BETA_BUILD == 'true'
         shell: bash
         run: |
           echo "🔵 Beta build detected - Disabling Google Services"
@@ -148,7 +148,7 @@ jobs:
           echo "Google Services successfully disabled for beta build"
 
       - name: Verify beta configuration (Android)
-        if: contains(github.ref_name, '-beta')
+        if: env.IS_BETA_BUILD == 'true'
         shell: bash
         run: |
           echo "════════════════════════════════════════════"
@@ -237,6 +237,7 @@ jobs:
             ${{ runner.os }}-gradle-
 
       - name: Cache CMake
+        if: env.IS_BETA_BUILD != 'true'
         uses: actions/cache@v3
         with:
           path: ~/cmake
