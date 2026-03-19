@@ -1,0 +1,82 @@
+name: Debug Build
+on:
+  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
+
+env:
+  FLUTTER_VERSION: "3.32.8"
+
+jobs:
+  build-android-debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      # Required if your app uses flutter_rust_bridge or Rust native code
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      
+      - uses: actions/setup-java@v3
+        with:
+          distribution: "adopt"
+          java-version: "17"
+      
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      
+      # Required for C++ native dependencies on Android
+      - name: Setup Android CMake
+        run: |
+          if [ ! -d "$HOME/cmake/cmake-3.18.1-Linux-x86_64" ]; then
+            mkdir -p $HOME/cmake && cd $HOME/cmake
+            wget -q https://github.com/Kitware/CMake/releases/download/v3.18.1/cmake-3.18.1-Linux-x86_64.tar.gz
+            tar -xzf cmake-3.18.1-Linux-x86_64.tar.gz
+          fi
+          cd $GITHUB_WORKSPACE
+          CMAKE_DIR="$HOME/cmake/cmake-3.18.1-Linux-x86_64"
+          mkdir -p android
+          echo "cmake.dir=$CMAKE_DIR" >> android/local.properties
+      
+      - name: Setup Environment
+        shell: bash
+        env:
+          AL_CLIENT_ID: ${{ secrets.AL_CLIENT_ID }}
+          AL_CLIENT_SECRET: ${{ secrets.AL_CLIENT_SECRET }}
+          SIMKL_CLIENT_ID: ${{ secrets.SIMKL_CLIENT_ID }}
+          SIMKL_CLIENT_SECRET: ${{ secrets.SIMKL_CLIENT_SECRET }}
+          MAL_CLIENT_ID: ${{ secrets.MAL_CLIENT_ID }}
+          MAL_CLIENT_SECRET: ${{ secrets.MAL_CLIENT_SECRET }}
+          CALLBACK_SCHEME: ${{ secrets.CALLBACK_SCHEME }}
+          GOOGLE_BOOKS_API_KEY: ${{ secrets.GOOGLE_BOOKS_API_KEY }}
+          GIT_CLIENT_ID: ${{ secrets.GIT_CLIENT_ID }}
+          GIT_CLIENT_SECRET: ${{ secrets.GIT_CLIENT_SECRET }}
+          GIT_CALLBACK_SCHEME: ${{ secrets.GIT_CALLBACK_SCHEME }}
+        run: |
+          cat > .env << EOF
+          AL_CLIENT_ID=$AL_CLIENT_ID
+          AL_CLIENT_SECRET=$AL_CLIENT_SECRET
+          SIMKL_CLIENT_ID=$SIMKL_CLIENT_ID
+          SIMKL_CLIENT_SECRET=$SIMKL_CLIENT_SECRET
+          MAL_CLIENT_ID=$MAL_CLIENT_ID
+          MAL_CLIENT_SECRET=$MAL_CLIENT_SECRET
+          CALLBACK_SCHEME=$CALLBACK_SCHEME
+          GOOGLE_BOOKS_API_KEY=$GOOGLE_BOOKS_API_KEY
+          GIT_CLIENT_ID=$GIT_CLIENT_ID
+          GIT_CLIENT_SECRET=$GIT_CLIENT_SECRET
+          GIT_CALLBACK_SCHEME=$GIT_CALLBACK_SCHEME
+          EOF
+          
+      - name: Build Android Debug
+        run: |
+          flutter pub get
+          flutter build apk --debug
+          
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-apk
+          # Standard Flutter output path for debug APKs
+          path: build/app/outputs/flutter-apk/app-debug.apk
