@@ -184,15 +184,24 @@ class _AnimeDetailsPageState extends State<AnimeDetailsPage> {
   }
 
   void _applyFillerInfo() {
-    if (fillerEpisodes.isEmpty || episodeList.isEmpty) return;
+    if (fillerEpisodes.isEmpty ||
+        (episodeList.isEmpty && rawEpisodes.isEmpty)) {
+      return;
+    }
 
     bool updated = false;
-    for (var ep in episodeList) {
-      if (fillerEpisodes.containsKey(ep.number)) {
-        ep.filler = true;
-        updated = true;
+
+    void markFillers(List<Episode> episodes) {
+      for (final ep in episodes) {
+        if (fillerEpisodes.containsKey(ep.number) && ep.filler != true) {
+          ep.filler = true;
+          updated = true;
+        }
       }
     }
+
+    markFillers(episodeList);
+    markFillers(rawEpisodes);
 
     if (updated && mounted) setState(() {});
   }
@@ -302,7 +311,7 @@ class _AnimeDetailsPageState extends State<AnimeDetailsPage> {
         '${sourceController.activeSource.value?.id}-${anilistData?.id}-${anilistData?.serviceType.index}';
     final savedTitle = DynamicKeys.mappedMediaTitle.get<String?>(key, null);
     final mappedData = await mapMedia(
-        formatTitles(widget.media) ?? [], searchedTitle,
+        formatTitles(anilistData ?? widget.media) ?? [], searchedTitle,
         savedTitle: savedTitle);
     if (_isStaleSourceRequest(activeRequestId) || !mounted) {
       return;
@@ -313,14 +322,43 @@ class _AnimeDetailsPageState extends State<AnimeDetailsPage> {
   }
 
   List<String>? formatTitles(Media media) {
-    return ['${media.title}*ANIME', media.romajiTitle];
+    String sanitize(String value) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty || trimmed == '?' || trimmed == '??') return '';
+      return trimmed;
+    }
+
+    final englishCandidates = [
+      sanitize(anilistData?.title ?? ''),
+      sanitize(media.title),
+      sanitize(widget.media.title),
+    ];
+    final romajiCandidates = [
+      sanitize(anilistData?.romajiTitle ?? ''),
+      sanitize(media.romajiTitle),
+      sanitize(widget.media.romajiTitle),
+    ];
+
+    final englishTitle =
+        englishCandidates.firstWhere((title) => title.isNotEmpty, orElse: () {
+      return romajiCandidates.firstWhere((title) => title.isNotEmpty,
+          orElse: () => 'Unknown Title');
+    });
+
+    final romajiTitle =
+        romajiCandidates.firstWhere((title) => title.isNotEmpty, orElse: () {
+      return englishTitle;
+    });
+
+    return ['$englishTitle*ANIME', romajiTitle];
   }
 
   void _processExtensionData(Media tempData) async {
     final episodes = tempData.mediaContent!.reversed.toList();
     final convertedEpisodes = _convertEpisodes(episodes, tempData.title);
-    rawEpisodes.value = _createRawEpisodes(convertedEpisodes);
-    episodeList.value = _renewEpisodeData(convertedEpisodes);
+    rawEpisodes.assignAll(_cloneEpisodes(convertedEpisodes));
+    episodeList.assignAll(_renewEpisodeData(_cloneEpisodes(convertedEpisodes)));
+    searchedTitle.value = "Found: ${tempData.title}";
     setState(() {});
   }
 
@@ -341,9 +379,9 @@ class _AnimeDetailsPageState extends State<AnimeDetailsPage> {
         episodeFuture.title ?? '',
       );
 
-      rawEpisodes.value = _createRawEpisodes(episodes);
-      episodeList.value = _renewEpisodeData(episodes);
-      searchedTitle.value = media.title;
+      rawEpisodes.assignAll(_cloneEpisodes(episodes));
+      episodeList.assignAll(_renewEpisodeData(_cloneEpisodes(episodes)));
+      searchedTitle.value = "Found: ${media.title}";
       _applyFillerInfo();
       if (mounted) {
         setState(() {});
@@ -382,11 +420,8 @@ class _AnimeDetailsPageState extends State<AnimeDetailsPage> {
     }
   }
 
-  List<Episode> _createRawEpisodes(List<Episode> eps) {
-    final newEps = eps
-        .map((e) => Episode(title: e.title, number: e.number, link: e.link))
-        .toList();
-    return newEps;
+  List<Episode> _cloneEpisodes(List<Episode> episodes) {
+    return episodes.map((episode) => Episode.fromJson(episode.toJson())).toList();
   }
 
   List<Episode> _convertEpisodes(List<dynamic> episodes, String title) {
