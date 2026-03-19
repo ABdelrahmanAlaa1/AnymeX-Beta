@@ -28,6 +28,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 class EpisodeSection extends StatefulWidget {
+  final RxBool? cancelAutoSearch;
   final dynamic searchedTitle;
   final dynamic anilistData;
   final RxList<Episode>? episodeList;
@@ -36,18 +37,16 @@ class EpisodeSection extends StatefulWidget {
   final Rx<bool> showAnify;
   final Future<void> Function() mapToAnilist;
   final Future<void> Function(Media) getDetailsFromSource;
-  // final List<SourcePreference> Function({required Source source})
-  //     getSourcePreference;
 
   const EpisodeSection({
     super.key,
+    this.cancelAutoSearch,
     required this.searchedTitle,
     required this.anilistData,
     required this.episodeList,
     required this.episodeError,
     required this.mapToAnilist,
     required this.getDetailsFromSource,
-    // required this.getSourcePreference,
     required this.isAnify,
     required this.showAnify,
   });
@@ -148,10 +147,20 @@ class _EpisodeSectionState extends State<EpisodeSection> {
 
     widget.episodeError.value = false;
     widget.episodeList?.value = [];
+    widget.cancelAutoSearch?.value = false;
 
     try {
       final sourceController = Get.find<ServiceHandler>().extensionService;
       sourceController.getExtensionByValue(value);
+
+      // --- Per-title source binding: save when user manually selects source ---
+      final activeSource = sourceController.activeSource.value;
+      if (activeSource != null && widget.anilistData != null) {
+        final mediaId = widget.anilistData.id.toString();
+        final serviceIndex = widget.anilistData.serviceType.index;
+        sourceController.saveMediaSourceBinding(
+            mediaId, serviceIndex, activeSource);
+      }
 
       _requestCounter.value++;
       int currentRequestId = _requestCounter.value;
@@ -242,6 +251,7 @@ class _EpisodeSectionState extends State<EpisodeSection> {
 
     widget.episodeError.value = false;
     widget.episodeList?.value = [];
+    widget.cancelAutoSearch?.value = false;
     _requestCounter.value++;
     int currentRequestId = _requestCounter.value;
     _episodeFuture.value = _fetchEpisodes(currentRequestId);
@@ -391,8 +401,45 @@ class _EpisodeSectionState extends State<EpisodeSection> {
                     ),
                   ),
                   const SizedBox(width: 12),
+                  if (widget.cancelAutoSearch != null) ...[
+                    AnymexOnTap(
+                      onTap: () {
+                        widget.cancelAutoSearch?.value = true;
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: context.colors.errorContainer.opaque(0.4),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: context.colors.error.opaque(0.3),
+                            width: 1,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.stop_circle_rounded,
+                              size: 14,
+                              color: context.colors.error,
+                            ),
+                            const SizedBox(width: 6),
+                            AnymexText(
+                              text: "Stop Search",
+                              size: 12,
+                              color: context.colors.error,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                  ],
                   AnymexOnTap(
                     onTap: () {
+                      widget.cancelAutoSearch?.value = true;
                       showWrongTitleModal(
                         context,
                         widget.anilistData.title,
@@ -406,6 +453,7 @@ class _EpisodeSectionState extends State<EpisodeSection> {
                             if (_requestCounter.value != currentRequestId) {
                               throw Exception('Request cancelled');
                             }
+                              widget.cancelAutoSearch?.value = false;
                             return widget.episodeList?.value ?? [];
                           });
                           final key =

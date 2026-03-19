@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:anymex/controllers/service_handler/service_handler.dart';
 import 'package:anymex/controllers/source/source_controller.dart';
 import 'package:anymex/models/Media/media.dart';
@@ -224,4 +226,193 @@ Future<Media?> mapMedia(
   return fallbackResults.isNotEmpty
       ? Media.froDMedia(fallbackResults.first, type)
       : Media(serviceType: ServicesType.anilist);
+}
+
+/// Try searching a single source with a timeout.
+/// Returns null if the source doesn't find a good match or times out.
+Future<Media?> _trySourceWithTimeout(
+  Source source,
+  List<String> animeId,
+  RxString searchedTitle,
+  String? savedTitle,
+  ItemType type,
+  Duration timeout,
+) async {
+  try {
+    final sourceController = Get.find<SourceController>();
+    final isManga = animeId[0].split("*").last == "MANGA";
+
+    String englishTitle = animeId[0].split("*").first.trim();
+    String romajiTitle = (animeId.length > 1 ? animeId[1] : '').trim();
+
+    if (_isInvalidTitle(englishTitle)) englishTitle = '';
+    if (_isInvalidTitle(romajiTitle)) romajiTitle = '';
+    if (englishTitle.isEmpty && romajiTitle.isNotEmpty) {
+      englishTitle = romajiTitle;
+    }
+    if (romajiTitle.isEmpty && englishTitle.isNotEmpty) {
+      romajiTitle = englishTitle;
+    }
+
+    final query = savedTitle ?? englishTitle;
+    if (query.isEmpty) return null;
+
+    searchedTitle.value = "Searching: ${source.name ?? ''}...";
+
+    final results = await source.methods
+        .search(query, 1, [])
+        .timeout(timeout, onTimeout: () {
+      throw TimeoutException('Source ${source.name} timed out');
+    });
+
+    if (results.list.isEmpty) return null;
+
+    // Use fuzzy matching to find best result
+    double bestScore = 0;
+    dynamic bestMatch;
+
+    for (final result in results.list) {
+      final resultTitle = result.title ?? '';
+      if (resultTitle.isEmpty) continue;
+
+      // Check exact saved title match
+      if (savedTitle != null &&
+          _normalizeLight(resultTitle) == _normalizeLight(savedTitle)) {
+        searchedTitle.value = "Found: $resultTitle";
+        return Media.froDMedia(result, type);
+      }
+
+      final score = _calculateMatchScore(
+        _normalizeLight(englishTitle),
+        _normalizeLight(resultTitle),
+        _extractSeasonNumber(englishTitle),
+        _extractSeasonNumber(resultTitle),
+      );
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = result;
+      }
+    }
+
+    // Also try romaji if different from english
+    if (bestScore < 0.9 &&
+        romajiTitle.isNotEmpty &&
+        _normalizeLight(romajiTitle) != _normalizeLight(englishTitle)) {
+      final romajiResults = await source.methods
+          .search(romajiTitle, 1, [])
+          .timeout(timeout, onTimeout: () {
+        throw TimeoutException('Source ${source.name} romaji timed out');
+      });
+
+      for (final result in romajiResults.list) {
+        final resultTitle = result.title ?? '';
+        if (resultTitle.isEmpty) continue;
+
+        final score = _calculateMatchScore(
+          _normalizeLight(romajiTitle),
+          _normalizeLight(resultTitle),
+          _extractSeasonNumber(romajiTitle),
+          _extractSeasonNumber(resultTitle),
+        );
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = result;
+        }
+      }
+    }
+
+    if (bestScore >= 0.7 && bestMatch != null) {
+      searchedTitle.value = "Found: ${bestMatch.title ?? ''}";
+      return Media.froDMedia(bestMatch, type);
+    }
+
+    return null;
+  } on TimeoutException {
+    searchedTitle.value = "${source.name ?? 'Source'} timed out";
+    return null;
+  } catch (e) {
+    searchedTitle.value = "${source.name ?? 'Source'} failed";
+    return null;
+  }
+}
+
+/// Auto-next/fallback search across all installed sources.
+/// Tries the active source first, then iterates through remaining sources.
+/// Stops when a match is found or [cancelSearch] is set to true.
+/// Returns a tuple of (matched Media, Source that found it).
+Future<(Media?, Source?)> mapMediaWithFallback(
+  List<String> animeId,
+  RxString searchedTitle, {
+  String? savedTitle,
+  required ItemType type,
+  required RxBool cancelSearch,
+  Duration timeout = const Duration(seconds: 5),
+}) async {
+  final sourceCtrl = Get.find<SourceController>();
+  final installed = List<Source>.from(sourceCtrl.getInstalledExtensions(type));
+  if (installed.isEmpty) {
+    searchedTitle.value = "No sources installed";
+    return (null, null);
+  }
+
+  final activeSource = switch (type) {
+    ItemType.anime => sourceCtrl.activeSource.value,
+    ItemType.manga => sourceCtrl.activeMangaSource.value,
+    ItemType.novel => sourceCtrl.activeNovelSource.value,
+    _ => sourceCtrl.activeSource.value,
+  };
+
+  final ordered = List<Source>.from(installed);
+  final orderIds = sourceCtrl.getExtensionOrder(type);
+  if (orderIds.isNotEmpty) {
+    final indexById = <String, int>{};
+    for (var i = 0; i < orderIds.length; i++) {
+      indexById[orderIds[i]] = i;
+    }
+
+    ordered.sort((a, b) {
+      final aIdx = indexById[a.id.toString()] ?? orderIds.length;
+      final bIdx = indexById[b.id.toString()] ?? orderIds.length;
+      return aIdx.compareTo(bIdx);
+    });
+  }
+
+  if (activeSource != null) {
+    ordered.removeWhere((s) => s.id == activeSource.id);
+    ordered.insert(0, activeSource);
+  }
+
+  // 1. Try the active (or saved) source first
+  if (activeSource != null && !cancelSearch.value) {
+    searchedTitle.value = "Searching: ${activeSource.name ?? ''}...";
+    final result = await _trySourceWithTimeout(
+        activeSource, animeId, searchedTitle, savedTitle, type, timeout);
+    if (result != null && result.id.toString().isNotEmpty) {
+      return (result, activeSource);
+    }
+  }
+
+  // 2. Auto-next: iterate remaining installed sources
+  for (final source in ordered) {
+    if (cancelSearch.value) {
+      searchedTitle.value = "Search paused";
+      break;
+    }
+    if (source.id == activeSource?.id) continue; // already tried
+
+    searchedTitle.value = "Trying: ${source.name ?? 'Unknown'}...";
+
+    final result = await _trySourceWithTimeout(
+        source, animeId, searchedTitle, savedTitle, type, timeout);
+    if (result != null && result.id.toString().isNotEmpty) {
+      // Switch active source to the one that found results (per-title, Option B)
+      sourceCtrl.setActiveSource(source);
+      return (result, source);
+    }
+  }
+
+  searchedTitle.value = "No Match Found";
+  return (null, null);
 }

@@ -278,6 +278,26 @@ class SourceController extends GetxController implements BaseService {
     lastUpdatedSource.value = tag;
   }
 
+  /// Saves which source (extension) was used for a specific media title.
+  /// Key: `mediaId-serviceTypeIndex`
+  void saveMediaSourceBinding(
+      String mediaId, int serviceIndex, Source source) {
+    final key = '$mediaId-$serviceIndex';
+    DynamicKeys.mappedMediaSource.set(key, source.id.toString());
+  }
+
+  /// Loads the saved source for a specific media title, if any.
+  /// Returns null if no binding was saved or the source is no longer installed.
+  Source? loadMediaSourceBinding(
+      String mediaId, int serviceIndex, ItemType type) {
+    final key = '$mediaId-$serviceIndex';
+    final savedSourceId =
+        DynamicKeys.mappedMediaSource.get<String?>(key, null);
+    if (savedSourceId == null || savedSourceId.isEmpty) return null;
+    final list = _installedFor(type);
+    return list.firstWhereOrNull((s) => s.id.toString() == savedSourceId);
+  }
+
   Source? getExtensionByValue(String value) => _activateByName(
       installedExtensions,
       value,

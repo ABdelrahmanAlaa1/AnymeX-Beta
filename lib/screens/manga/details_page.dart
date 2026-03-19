@@ -73,6 +73,7 @@ class _MangaDetailsPageState extends State<MangaDetailsPage> {
   // Extension Data
   RxString searchedTitle = ''.obs;
   RxList<Chapter>? chapterList = <Chapter>[].obs;
+  final RxBool cancelAutoSearch = false.obs;
 
   // Page View Tracker
   RxInt selectedPage = 0.obs;
@@ -231,16 +232,42 @@ class _MangaDetailsPageState extends State<MangaDetailsPage> {
   Future<void> _mapToService({int? requestId}) async {
     final activeRequestId = requestId ?? _beginChapterRequest();
     chapterList?.clear();
+
+    // --- Per-title source binding: restore saved source for this media ---
+    final mediaId = (anilistData?.id ?? widget.media.id).toString();
+    final serviceIndex = mediaService.index;
+    final savedSource = sourceController.loadMediaSourceBinding(
+        mediaId, serviceIndex, ItemType.manga);
+    if (savedSource != null &&
+        savedSource.id != sourceController.activeMangaSource.value?.id) {
+      sourceController.setActiveSource(savedSource);
+    }
+
     final key =
         '${sourceController.activeMangaSource.value?.id}-${anilistData?.id}-${mediaService.index}';
     final savedTitle = DynamicKeys.mappedMediaTitle.get<String?>(key, null);
     final baseMedia = anilistData ?? widget.media;
-    final mappedData = await mapMedia(formatTitles(baseMedia), searchedTitle,
-        savedTitle: savedTitle);
+    
+    // --- Auto-next search with fallback ---
+    final fallbackResult = await mapMediaWithFallback(
+      formatTitles(baseMedia),
+      searchedTitle,
+      savedTitle: savedTitle,
+      type: ItemType.manga,
+      cancelSearch: cancelAutoSearch,
+    );
+    final mappedData = fallbackResult.$1;
+    final matchedSource = fallbackResult.$2;
     if (_isStaleChapterRequest(activeRequestId) || !mounted) {
       return;
     }
     if (mappedData != null && mappedData.id.toString().isNotEmpty) {
+      // --- Per-title source binding: save current source for this media ---
+      final currentSource = sourceController.activeMangaSource.value;
+      if (currentSource != null) {
+        sourceController.saveMediaSourceBinding(
+            mediaId, serviceIndex, currentSource);
+      }
       await _fetchSourceDetails(mappedData, requestId: activeRequestId);
     }
   }
@@ -561,6 +588,7 @@ class _MangaDetailsPageState extends State<MangaDetailsPage> {
 
   Widget _buildChapterSection(BuildContext context) {
     return ChapterSection(
+      cancelAutoSearch: cancelAutoSearch,
       searchedTitle: searchedTitle,
       anilistData: anilistData ?? widget.media,
       chapterList: chapterList!,

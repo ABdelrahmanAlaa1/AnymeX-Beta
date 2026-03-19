@@ -23,6 +23,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 class ChapterSection extends StatelessWidget {
+  final RxBool? cancelAutoSearch;
   final RxString searchedTitle;
   final Media anilistData;
   final RxList<Chapter> chapterList;
@@ -38,6 +39,7 @@ class ChapterSection extends StatelessWidget {
 
   const ChapterSection({
     super.key,
+    this.cancelAutoSearch,
     required this.searchedTitle,
     required this.anilistData,
     required this.chapterList,
@@ -99,8 +101,45 @@ class ChapterSection extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 12),
+                    if (cancelAutoSearch != null) ...[
+                      AnymexOnTap(
+                        onTap: () {
+                          cancelAutoSearch?.value = true;
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: context.colors.errorContainer.opaque(0.4),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: context.colors.error.opaque(0.3),
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.stop_circle_rounded,
+                                size: 14,
+                                color: context.colors.error,
+                              ),
+                              const SizedBox(width: 6),
+                              AnymexText(
+                                text: "Stop Search",
+                                size: 12,
+                                color: context.colors.error,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                    ],
                     AnymexOnTap(
                       onTap: () {
+                        cancelAutoSearch?.value = true;
                         showWrongTitleModal(
                           context,
                           anilistData.title,
@@ -111,6 +150,7 @@ class ChapterSection extends StatelessWidget {
                             final key =
                                 '${sourceController.activeMangaSource.value?.id}-${anilistData.id}-${anilistData.serviceType.index}';
                             DynamicKeys.mappedMediaTitle.set(key, manga.title);
+                            cancelAutoSearch?.value = false;
                           },
                           isManga: true,
                         );
@@ -258,8 +298,17 @@ class ChapterSection extends StatelessWidget {
       onActionPressed: () => openSourcePreferences(Get.context!),
       onChanged: (DropdownItem item) async {
         chapterList.value = [];
+        cancelAutoSearch?.value = false;
         try {
           sourceController.getMangaExtensionByName(item.value);
+          // --- Per-title source binding: save when user manually selects source ---
+          final activeSource = sourceController.activeMangaSource.value;
+          if (activeSource != null) {
+            final mediaId = anilistData.id.toString();
+            final serviceIndex = anilistData.serviceType.index;
+            sourceController.saveMediaSourceBinding(
+                mediaId, serviceIndex, activeSource);
+          }
           await mapToAnilist();
         } catch (e) {
           Logger.i(e.toString());
@@ -279,6 +328,7 @@ class ChapterSection extends StatelessWidget {
     sourceController.setActiveSource(newSubSource);
 
     chapterList.value = [];
+    cancelAutoSearch?.value = false;
     try {
       await mapToAnilist();
     } catch (e) {

@@ -94,6 +94,7 @@ class _AnimeDetailsPageState extends State<AnimeDetailsPage> {
   final sourceController = Get.find<SourceController>();
 
   final RxInt timeLeft = 0.obs;
+  final RxBool cancelAutoSearch = false.obs;
 
   String posterColor = '';
   int _sourceRequestVersion = 0;
@@ -307,16 +308,42 @@ class _AnimeDetailsPageState extends State<AnimeDetailsPage> {
     episodeList.clear();
     rawEpisodes.clear();
     episodeError.value = false;
+
+    // --- Per-title source binding: restore saved source for this media ---
+    final mediaId = (anilistData?.id ?? widget.media.id).toString();
+    final serviceIndex = (anilistData?.serviceType ?? widget.media.serviceType).index;
+    final savedSource = sourceController.loadMediaSourceBinding(
+        mediaId, serviceIndex, ItemType.anime);
+    if (savedSource != null &&
+        savedSource.id != sourceController.activeSource.value?.id) {
+      sourceController.setActiveSource(savedSource);
+    }
+
     final key =
         '${sourceController.activeSource.value?.id}-${anilistData?.id}-${anilistData?.serviceType.index}';
     final savedTitle = DynamicKeys.mappedMediaTitle.get<String?>(key, null);
-    final mappedData = await mapMedia(
-        formatTitles(anilistData ?? widget.media) ?? [], searchedTitle,
-        savedTitle: savedTitle);
+    
+    // --- Auto-next search with fallback ---
+    final fallbackResult = await mapMediaWithFallback(
+      formatTitles(anilistData ?? widget.media) ?? [],
+      searchedTitle,
+      savedTitle: savedTitle,
+      type: ItemType.anime,
+      cancelSearch: cancelAutoSearch,
+    );
+    final mappedData = fallbackResult.$1;
+    final matchedSource = fallbackResult.$2;
+    
     if (_isStaleSourceRequest(activeRequestId) || !mounted) {
       return;
     }
     if (mappedData != null && mappedData.id.toString().isNotEmpty) {
+      // --- Per-title source binding: save current source for this media ---
+      final currentSource = sourceController.activeSource.value;
+      if (currentSource != null) {
+        sourceController.saveMediaSourceBinding(
+            mediaId, serviceIndex, currentSource);
+      }
       await _fetchSourceDetails(mappedData, requestId: activeRequestId);
     }
   }
@@ -815,6 +842,7 @@ class _AnimeDetailsPageState extends State<AnimeDetailsPage> {
   Widget _buildEpisodeSection(BuildContext context) {
     return Obx(() {
       return EpisodeSection(
+        cancelAutoSearch: cancelAutoSearch,
         searchedTitle: searchedTitle,
         anilistData: anilistData ?? widget.media,
         episodeList: (isAnify.value) ? episodeList : rawEpisodes,

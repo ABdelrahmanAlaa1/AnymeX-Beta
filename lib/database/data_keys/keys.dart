@@ -168,6 +168,7 @@ enum DynamicKeys {
   librarySortOrder,
   libraryGridSize,
   mappedMediaTitle,
+  mappedMediaSource,
   offlineVideoProgress;
 
   T get<T>(dynamic id, [T? defaultValue]) {

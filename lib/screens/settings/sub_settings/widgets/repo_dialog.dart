@@ -198,16 +198,22 @@ class _GitHubRepoDialogState extends State<GitHubRepoDialog> {
                       child: TextField(
                         controller: _controller,
                         focusNode: _focusNode,
+                        minLines: 3,
+                        maxLines: 7,
                         decoration: InputDecoration(
-                            hintText: 'https://github.com/username/repo.json',
+                            hintText: 'https://github.com/user/repo1.json\nhttps://github.com/user/repo2.json',
                             hintStyle: TextStyle(
                               color: colorScheme.onSurfaceVariant.opaque(0.6),
                               fontSize: 14,
                             ),
-                            prefixIcon: Icon(
-                              HugeIcons.strokeRoundedLink01,
-                              color: colorScheme.onSurfaceVariant,
-                              size: 18,
+                            alignLabelWithHint: true,
+                            prefixIcon: Padding(
+                              padding: const EdgeInsets.only(bottom: 50.0),
+                              child: Icon(
+                                HugeIcons.strokeRoundedLink01,
+                                color: colorScheme.onSurfaceVariant,
+                                size: 18,
+                              ),
                             ),
                             border: InputBorder.none,
                             contentPadding: const EdgeInsets.symmetric(
@@ -222,7 +228,6 @@ class _GitHubRepoDialogState extends State<GitHubRepoDialog> {
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: colorScheme.onSurface,
                         ),
-                        onSubmitted: (_) => _handleSubmit(),
                         onChanged: (value) {
                           if (_errorMessage != null) {
                             setState(() {
