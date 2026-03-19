@@ -150,7 +150,6 @@ class ChapterSection extends StatelessWidget {
                             final key =
                                 '${sourceController.activeMangaSource.value?.id}-${anilistData.id}-${anilistData.serviceType.index}';
                             DynamicKeys.mappedMediaTitle.set(key, manga.title);
-                            cancelAutoSearch?.value = false;
                           },
                           isManga: true,
                         );
@@ -298,7 +297,6 @@ class ChapterSection extends StatelessWidget {
       onActionPressed: () => openSourcePreferences(Get.context!),
       onChanged: (DropdownItem item) async {
         chapterList.value = [];
-        cancelAutoSearch?.value = false;
         try {
           sourceController.getMangaExtensionByName(item.value);
           // --- Per-title source binding: save when user manually selects source ---
@@ -328,7 +326,6 @@ class ChapterSection extends StatelessWidget {
     sourceController.setActiveSource(newSubSource);
 
     chapterList.value = [];
-    cancelAutoSearch?.value = false;
     try {
       await mapToAnilist();
     } catch (e) {

@@ -351,38 +351,12 @@ Future<(Media?, Source?)> mapMediaWithFallback(
   Duration timeout = const Duration(seconds: 5),
 }) async {
   final sourceCtrl = Get.find<SourceController>();
-  final installed = List<Source>.from(sourceCtrl.getInstalledExtensions(type));
-  if (installed.isEmpty) {
-    searchedTitle.value = "No sources installed";
-    return (null, null);
-  }
+  final sources = sourceCtrl.getInstalledExtensions(type);
 
-  final activeSource = switch (type) {
-    ItemType.anime => sourceCtrl.activeSource.value,
-    ItemType.manga => sourceCtrl.activeMangaSource.value,
-    ItemType.novel => sourceCtrl.activeNovelSource.value,
-    _ => sourceCtrl.activeSource.value,
-  };
-
-  final ordered = List<Source>.from(installed);
-  final orderIds = sourceCtrl.getExtensionOrder(type);
-  if (orderIds.isNotEmpty) {
-    final indexById = <String, int>{};
-    for (var i = 0; i < orderIds.length; i++) {
-      indexById[orderIds[i]] = i;
-    }
-
-    ordered.sort((a, b) {
-      final aIdx = indexById[a.id.toString()] ?? orderIds.length;
-      final bIdx = indexById[b.id.toString()] ?? orderIds.length;
-      return aIdx.compareTo(bIdx);
-    });
-  }
-
-  if (activeSource != null) {
-    ordered.removeWhere((s) => s.id == activeSource.id);
-    ordered.insert(0, activeSource);
-  }
+  final isManga = type == ItemType.manga || type == ItemType.novel;
+  final activeSource = isManga
+      ? sourceCtrl.activeMangaSource.value
+      : sourceCtrl.activeSource.value;
 
   // 1. Try the active (or saved) source first
   if (activeSource != null && !cancelSearch.value) {
@@ -395,7 +369,7 @@ Future<(Media?, Source?)> mapMediaWithFallback(
   }
 
   // 2. Auto-next: iterate remaining installed sources
-  for (final source in ordered) {
+  for (final source in sources) {
     if (cancelSearch.value) {
       searchedTitle.value = "Search paused";
       break;

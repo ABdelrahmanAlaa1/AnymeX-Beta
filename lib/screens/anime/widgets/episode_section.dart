@@ -147,7 +147,6 @@ class _EpisodeSectionState extends State<EpisodeSection> {
 
     widget.episodeError.value = false;
     widget.episodeList?.value = [];
-    widget.cancelAutoSearch?.value = false;
 
     try {
       final sourceController = Get.find<ServiceHandler>().extensionService;
@@ -251,7 +250,6 @@ class _EpisodeSectionState extends State<EpisodeSection> {
 
     widget.episodeError.value = false;
     widget.episodeList?.value = [];
-    widget.cancelAutoSearch?.value = false;
     _requestCounter.value++;
     int currentRequestId = _requestCounter.value;
     _episodeFuture.value = _fetchEpisodes(currentRequestId);
@@ -453,7 +451,6 @@ class _EpisodeSectionState extends State<EpisodeSection> {
                             if (_requestCounter.value != currentRequestId) {
                               throw Exception('Request cancelled');
                             }
-                              widget.cancelAutoSearch?.value = false;
                             return widget.episodeList?.value ?? [];
                           });
                           final key =
