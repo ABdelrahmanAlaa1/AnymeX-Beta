@@ -1,5 +1,8 @@
-name: Debug Build
+name: Android Debug Build
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
 
 env:
@@ -10,13 +13,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      
+
+      - name: Set Build Type Environment Variable
+        shell: bash
+        run: |
+          if [[ "${{ github.ref_name }}" == *"-beta" ]]; then
+            echo "IS_BETA_BUILD=true" >> $GITHUB_ENV
+            echo "This is a BETA build. Caching will be disabled."
+          else
+            echo "IS_BETA_BUILD=false" >> $GITHUB_ENV
+            echo "This is a STABLE build. Caching will be enabled."
+          fi
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          
+
       - name: Cache Rust
+        if: env.IS_BETA_BUILD != 'true'
         uses: actions/cache@v3
         with:
           path: |
@@ -28,18 +43,190 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
-      
+
       - uses: actions/setup-java@v3
         with:
           distribution: "adopt"
           java-version: "17"
-      
+
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: true
-          
+          cache: ${{ env.IS_BETA_BUILD != 'true' }}
+
+      - name: Auto rename for beta build
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+
+          echo "════════════════════════════════════════════"
+          echo "  Build Type Detection"
+          echo "════════════════════════════════════════════"
+          echo "Tag: $TAG"
+          echo ""
+
+          if [[ "$TAG" == *"-beta" ]]; then
+            echo "🔵 Beta build detected"
+            echo "────────────────────────────────────────────"
+
+            VERSION_PART=$(echo "$TAG" | sed 's/^v//')
+            echo "Display version: v$VERSION_PART"
+
+            if [[ "$VERSION_PART" == *"+"* ]]; then
+              SEMVER=$(echo "$VERSION_PART" | cut -d'+' -f1 | cut -d'-' -f1)
+            else
+              SEMVER=$(echo "$VERSION_PART" | cut -d'-' -f1)
+            fi
+
+            echo "Semver: $SEMVER"
+
+            BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
+            PUBSPEC_VERSION="${SEMVER}+${BUILD_NUMBER}"
+            DISPLAY_VERSION="v${VERSION_PART}"
+
+            echo "Pubspec version: $PUBSPEC_VERSION"
+            echo "Display version: $DISPLAY_VERSION"
+            echo ""
+
+            if [ ! -f "scripts/rename_app.sh" ]; then
+              echo "❌ Error: scripts/rename_app.sh not found"
+              echo "Expected location: scripts/rename_app.sh"
+              exit 1
+            fi
+
+            chmod +x scripts/rename_app.sh
+            echo "Running rename script..."
+            echo "════════════════════════════════════════════"
+
+            if ./scripts/rename_app.sh "$PUBSPEC_VERSION" "$DISPLAY_VERSION"; then
+              echo ""
+              echo "✅ Beta rename completed successfully"
+              echo "   Package: com.ryan.anymex → com.ryan.anymexbeta"
+              echo "   App Name: AnymeX → AnymeX β"
+              echo "   Pubspec Version: $PUBSPEC_VERSION"
+              echo "   Display Version: $DISPLAY_VERSION"
+            else
+              echo ""
+              echo "❌ Beta rename failed"
+              exit 1
+            fi
+          else
+            echo "🟢 Stable build detected"
+            echo "────────────────────────────────────────────"
+            echo "Skipping rename (not a beta tag)"
+            echo ""
+            echo "Tag formats:"
+            echo "  • Beta:   v0.0.0-beta (triggers rename)"
+            echo "  • Beta with iteration:   v0.0.0+1-beta (triggers rename)"
+            echo "  • Stable: v0.0.0 (no rename)"
+          fi
+
+          echo "════════════════════════════════════════════"
+
+      - name: Configure Google Services for Beta
+        if: contains(github.ref_name, '-beta')
+        shell: bash
+        run: |
+          echo "🔵 Beta build detected - Disabling Google Services"
+
+          if [ -f "android/app/build.gradle" ]; then
+            echo "Modifying android/app/build.gradle..."
+            sed -i '/com\.google\.gms\.google-services/d' android/app/build.gradle
+            echo "✅ Removed google-services plugin from app/build.gradle"
+          fi
+
+          if [ -f "android/build.gradle" ]; then
+            echo "Modifying android/build.gradle..."
+            sed -i '/com\.google\.gms:google-services:/d' android/build.gradle
+            echo "✅ Removed google-services classpath from android/build.gradle"
+          fi
+
+          echo ""
+          echo "Verification - checking for remaining google-services references:"
+          grep -n "google-services" android/app/build.gradle android/build.gradle || echo "✅ No google-services references found"
+          echo ""
+          echo "Google Services successfully disabled for beta build"
+
+      - name: Verify beta configuration (Android)
+        if: contains(github.ref_name, '-beta')
+        shell: bash
+        run: |
+          echo "════════════════════════════════════════════"
+          echo "  Verifying Beta Configuration (Android)"
+          echo "════════════════════════════════════════════"
+
+          ERRORS=0
+
+          echo ""
+          echo "🎯 DART"
+          echo "────────────────────────────────────────────"
+          if grep -q 'title: "AnymeX β"' lib/main.dart 2>/dev/null; then
+            echo "✅ MaterialApp title in lib/main.dart"
+          else
+            echo "❌ MaterialApp title NOT updated in lib/main.dart"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          echo ""
+          echo "📱 ANDROID"
+          echo "────────────────────────────────────────────"
+          if grep -q "com.ryan.anymexbeta" android/app/build.gradle* 2>/dev/null; then
+            echo "✅ Package name in build.gradle"
+          else
+            echo "❌ Package name NOT updated in build.gradle"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          if grep -q 'package="com.ryan.anymexbeta"' android/app/src/main/AndroidManifest.xml 2>/dev/null; then
+            echo "✅ Package in AndroidManifest.xml"
+          else
+            echo "❌ Package NOT updated in AndroidManifest.xml"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          if grep -q 'android:label="AnymeX β"' android/app/src/main/AndroidManifest.xml 2>/dev/null; then
+            echo "✅ App name in AndroidManifest.xml"
+          else
+            echo "❌ App name NOT updated in AndroidManifest.xml"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          if [ -d "android/app/src/main/kotlin/com/ryan/anymexbeta" ]; then
+            echo "✅ Kotlin package directory moved"
+          else
+            echo "❌ Kotlin package directory NOT found"
+            echo "   Expected: android/app/src/main/kotlin/com/ryan/anymexbeta"
+            if [ -d "android/app/src/main/kotlin/com/ryan/anymex" ]; then
+              echo "   Found old directory still exists: android/app/src/main/kotlin/com/ryan/anymex"
+            fi
+            ls -la android/app/src/main/kotlin/com/ryan/ 2>/dev/null || echo "   Directory structure missing"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          if [ -d "android/app/src/main/kotlin/com/ryan/anymexbeta" ]; then
+            if grep -q "package com.ryan.anymexbeta" android/app/src/main/kotlin/com/ryan/anymexbeta/*.kt 2>/dev/null; then
+              echo "✅ Kotlin package declaration updated"
+            else
+              echo "❌ Kotlin package declaration NOT updated"
+              head -n 1 android/app/src/main/kotlin/com/ryan/anymexbeta/*.kt 2>/dev/null || echo "   No Kotlin files found"
+              ERRORS=$((ERRORS + 1))
+            fi
+          fi
+
+          echo ""
+          echo "════════════════════════════════════════════"
+          if [ $ERRORS -eq 0 ]; then
+            echo "✅ ANDROID BETA CONFIGURATION VERIFIED SUCCESSFULLY"
+            echo "════════════════════════════════════════════"
+            exit 0
+          else
+            echo "❌ VERIFICATION FAILED: $ERRORS error(s) found"
+            echo "════════════════════════════════════════════"
+            exit 1
+          fi
+
       - name: Cache Gradle
+        if: env.IS_BETA_BUILD != 'true'
         uses: actions/cache@v3
         with:
           path: |
@@ -48,13 +235,13 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
-            
+
       - name: Cache CMake
         uses: actions/cache@v3
         with:
           path: ~/cmake
           key: cmake-3.18.1-linux-x64
-      
+
       - name: Setup Android CMake
         run: |
           if [ ! -d "$HOME/cmake/cmake-3.18.1-Linux-x86_64" ]; then
@@ -66,7 +253,7 @@ jobs:
           CMAKE_DIR="$HOME/cmake/cmake-3.18.1-Linux-x86_64"
           mkdir -p android
           echo "cmake.dir=$CMAKE_DIR" >> android/local.properties
-      
+
       - name: Setup Environment
         shell: bash
         env:
@@ -95,7 +282,11 @@ jobs:
           GIT_CLIENT_SECRET=$GIT_CLIENT_SECRET
           GIT_CALLBACK_SCHEME=$GIT_CALLBACK_SCHEME
           EOF
-          
+
+      - name: Clean Flutter for Beta Build
+        if: env.IS_BETA_BUILD == 'true'
+        run: flutter clean
+
       - name: Build Android Debug
         run: |
           flutter pub get
@@ -106,7 +297,7 @@ jobs:
           mv app-arm64-v8a-debug.apk AnymeX-Android-arm64-v8a-debug.apk
           mv app-x86_64-debug.apk AnymeX-Android-x86_64-debug.apk
           mv app-debug.apk AnymeX-Android-universal-debug.apk
-          
+
       - name: Upload Debug APKs
         uses: actions/upload-artifact@v4
         with:
